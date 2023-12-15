@@ -1,0 +1,168 @@
+/* ECO520 Homework 5 Regression Analysis on Airbnb Price in Chicago */
+
+/* Load the data */
+filename webdat url "https://bigblue.depaul.edu/jlee141/econdata/eco520/airbnb2019.csv";
+
+/* Import Chicago Airbnb data */
+PROC IMPORT OUT=airbnb0 DATAFILE=webdat DBMS=CSV REPLACE;
+RUN;
+
+/* Create your own random sample data with a seed */
+proc surveyselect data=airbnb0 method=srs seed=2119573 n=1000 out=airbnb1;
+RUN;
+
+/* Create the hostclass variable */
+data airbnb2;
+  set airbnb1;
+  if 0 < host_total_listings < 3 then hostclass = 1;
+  else if 3 <= host_total_listings < 20 then hostclass = 2;
+  else if host_total_listings >= 20 then hostclass = 3;
+  /* Add more variables as needed */
+run;
+
+/* 1. Create dummy variables */
+data airbnb2;
+  set airbnb2;
+
+  /* 1.1) Create dummy variables for popular hosts */
+  popular_host_dummy = ifn(number_of_reviews > 80, 1, 0);
+
+  /* 1.2) Create dummy variables for big family units */
+  big_family_unit_dummy = ifn(accommodates > 8, 1, 0);
+
+  /* 1.3) Create dummy variables for long-term rent units */
+  long_term_rent_dummy = ifn(minimum_nights > 7, 1, 0);
+
+run;
+
+/* 2. Identify and handle outliers and missing data */
+
+/* Use PROC UNIVARIATE to identify outliers and missing values for all variables */
+proc univariate data=airbnb2;
+  var ListingMonth host_total_listings accommodates bathrooms bedrooms beds guests_included minimum_nights number_of_reviews review_scores_rating reviews_per_month PricePerNight;
+  histogram / normal;
+run;
+
+/*3-To find potential variables to have a nonlinear relationship with price,
+ we can create scatter plots of price against each of the other variables 
+ in the dataset..*/
+proc sgplot data=airbnb2;
+scatter x=host_total_listings y=PricePerNight;
+run;
+
+proc sgplot data=airbnb2;
+scatter x=accommodates y=PricePerNight;
+run;
+
+proc sgplot data=airbnb2;
+scatter x=bathrooms y=PricePerNight;
+run;
+/*These scatter plots show that there may be a nonlinear relationship between price
+ and several of the variables, including host_total_listings, accommodates,
+ and bathrooms.*/
+
+/*To further explore these potential nonlinear relationships,
+ we can create squared variables for each of these variables.*/
+data mydata_transformed;
+set airbnb2;
+host_total_listings_squared = host_total_listings * host_total_listings;
+accommodates_squared = accommodates * accommodates;
+bathrooms_squared = bathrooms * bathrooms;
+run;
+
+/*We can then create scatter plots of price against each of the squared variables.*/
+proc sgplot data=mydata_transformed;
+scatter x=host_total_listings_squared y=PricePerNight;
+run;
+
+proc sgplot data=mydata_transformed;
+scatter x=accommodates_squared y=PricePerNight;
+run;
+
+proc sgplot data=mydata_transformed;
+scatter x=bathrooms_squared y=PricePerNight;
+run;
+
+/*These scatter plots show that the logarithmic variables have a more linear 
+relationship with price than the squared variables.
+
+Based on these scatter plots, we can conclude that the following 
+variables may have a nonlinear relationship with price:
+
+    host_total_listings
+    accommodates
+    bathrooms
+*/
+
+/*4- From the models in 3, we want to consider if the hostclass influences the price
+ along with the accommodates. Estimate the appropriate model and explain
+ if the hostclass is a significant variable to the price.  */
+
+/*To estimate the appropriate model and explain if the hostclass is 
+a significant variable to the price, we can use the following SAS code:*/
+
+proc reg data=mydata_transformed;
+  model PricePerNight = hostclass accommodates;
+  output out=reg_results p=predicted;
+run;
+
+
+/* 5. Machine Learning using Regression Analysis */
+
+/* 5.1) Split the data into training (70%) and testing (30%) datasets */
+data airbnb_train airbnb_test;
+  set airbnb2;
+  if ranuni(55555) < 0.7 then output airbnb_train;
+  else output airbnb_test;
+run;
+
+/* 5.1.1) Adjusted R-square model selection */
+proc reg data=airbnb_train;
+  model PricePerNight = ListingMonth host_total_listings accommodates bathrooms bedrooms beds guests_included minimum_nights number_of_reviews review_scores_rating reviews_per_month
+    popular_host_dummy big_family_unit_dummy long_term_rent_dummy / ADJRSQ;
+  output out=reg_results p=predicted;
+run;
+
+/* 5.1.2) Stepwise model selection */
+proc reg data=airbnb_train;
+  model PricePerNight = ListingMonth host_total_listings accommodates bathrooms bedrooms beds guests_included minimum_nights number_of_reviews review_scores_rating reviews_per_month
+    popular_host_dummy big_family_unit_dummy long_term_rent_dummy / selection=stepwise;
+  output out=reg_results p=predicted;
+run;
+
+/* 5.1.3) Your own best model different from 5.1.1 and 5.1.2 */
+proc reg data=airbnb_train;
+model PricePerNight = ListingMonth host_total_listings accommodates bathrooms bedrooms beds guests_included minimum_nights number_of_reviews review_scores_rating reviews_per_month popular_host_dummy big_family_unit_dummy long_term_rent_dummy;
+run;
+
+/* 5.2) Perform out-of-sample prediction using testing data */
+proc reg data=airbnb_test;
+  model PricePerNight = ListingMonth host_total_listings accommodates bathrooms bedrooms beds guests_included minimum_nights number_of_reviews review_scores_rating reviews_per_month
+    popular_host_dummy big_family_unit_dummy long_term_rent_dummy;
+  output out=reg_results_test p=predicted;
+run;
+
+/* 5.2.1) Calculate MSE */
+proc means data=reg_results_test mean std;
+  var PricePerNight predicted;
+run;
+
+/* 5.2.2) Calculate RMSE */
+data reg_results_test;
+  set reg_results_test;
+  RMSE = sqrt((PricePerNight - predicted) ** 2);
+run;
+
+/* 5.2.3) Calculate MPE */
+data reg_results_test;
+  set reg_results_test;
+  MPE = ((PricePerNight - predicted) / PricePerNight) * 100;
+run;
+
+/* 5.2.4) Calculate MAE */
+data reg_results_test;
+  set reg_results_test;
+  MAE = abs(PricePerNight - predicted);
+run;
+
+*/
